@@ -1,8 +1,26 @@
 import BusterState.BusterState
 
-import math._
-import scala.util._
 import scala.io.StdIn._
+
+sealed trait Action {
+  def toInstructionString: String
+}
+
+case class MOVE(to: Point) extends Action {
+  override def toInstructionString: String = s"MOVE $to"
+}
+
+case class BUST(ghostId: Int) extends Action {
+  override def toInstructionString: String = s"BUST $ghostId"
+}
+
+case object RELEASE extends Action {
+  override def toInstructionString: String = s"RELEASE"
+}
+
+case class STUN(enemyId: Int) extends Action {
+  override def toInstructionString: String = s"STUN $enemyId"
+}
 
 object EntityType {
   type EntityType = Int
@@ -102,14 +120,32 @@ object Constants {
   val BASE_BUST_RANGE2 = BASE_BUST_RANGE * BASE_BUST_RANGE
 }
 
+trait Guide {
+  def findDirectionFor(buster: Entity): MOVE
+}
+
+object RandomSwarmer extends Guide {
+  override def findDirectionFor(buster: Entity): MOVE = {
+    MOVE(
+      Point(
+        x = scala.util.Random.nextInt(Constants.X_MAX),
+        y = scala.util.Random.nextInt(Constants.Y_MAX)
+      )
+    )
+  }
+}
+
 /**
  * Send your busters out into the fog to trap ghosts and bring them home!
  * */
 object Player extends App {
+  // ALGO PARAMS
+  val guide: Guide = RandomSwarmer
 
   val bustersPerPlayer = readLine.toInt // the amount of busters you control
   val ghostCount = readLine.toInt // the amount of ghosts on the map
   val myTeamId = readLine.toInt // if this is 0, your base is on the top left of the map, if it is one, on the bottom right
+  val enemyTeamId = 1 - myTeamId
 
   val (myBase, enemyBase) = if (myTeamId == 0) {
     (Constants.LEFT_CORNER, Constants.RIGHT_CORNER)
@@ -137,38 +173,52 @@ object Player extends App {
     }
 
     val myTeam = entities.filter(_.entityType == myTeamId)
+    val enemyTeam = entities.filter(_.entityType == enemyTeamId)
 
     val maybeNextGhost = entities.find(_.entityType == EntityType.Ghost)
     val ghostInSight = maybeNextGhost.isDefined
     val nextGhost = maybeNextGhost.getOrElse(null)
 
     // MOVE x y | BUST id | RELEASE | STUN id
-    myTeam.foreach { buster =>
-      buster.state match {
+    myTeam.map { buster =>
+      if (buster.value)
+      val maybeAction = buster.state match {
         case BusterState.EMPTY =>
-          if (maybeNextGhost.isEmpty) {
-            println(s"MOVE $enemyBase")
-          } else if (buster.isInBustRangeOf(nextGhost)) {
-            println(s"BUST ${nextGhost.entityId}")
+          if (ghostInSight) {
+            if (buster.isInBustRangeOf(nextGhost)) {
+              Some(BUST(nextGhost.entityId))
+            } else {
+              Some(MOVE(nextGhost.position))
+            }
           } else {
-            println(s"MOVE ${nextGhost.position}")
+            None
           }
         case BusterState.CARRYING =>
           if (buster.isInCollectRangeOf(myBase)) {
-            println("RELEASE")
+            Some(RELEASE)
           } else {
-            println(s"MOVE $myBase")
+            Some(MOVE(myBase))
           }
         case BusterState.STUNNED =>
-          println("MOVE 8000 4500") // MOVE x y | BUST id | RELEASE | STUN id
+          None
 
         case BusterState.BUSTING =>
           if (ghostInSight) {
-            println(s"BUST ${nextGhost.entityId}")
+            Some(BUST(nextGhost.entityId))
           } else {
-            println("MOVE 8000 4500") // MOVE x y | BUST id | RELEASE | STUN id
+            None
           }
       }
+
+      maybeAction.getOrElse(guide.findDirectionFor(buster))
+    }.foreach { a =>
+      println(a.toInstructionString)
     }
   }
 }
+
+/*
+Rajouter la mémoire pour savoir si je peux stun
+Stun comme un batard dès que possible
+Se souvenir des fantômes déjà vus
+ */
